@@ -3,109 +3,125 @@ import pathlib
 import subprocess
 import sys
 import shutil
-
 from setuptools import setup
-from setuptools.command.build_py import build_py
+from setuptools.command.install import install
 from setuptools.command.develop import develop
 
 # The directory containing this file
 HERE = pathlib.Path(__file__).parent.resolve()
 
-class CMakeBuild:
-    """Helper class to build CMake projects"""
+def setup_whisper_cpp():
+    """Setup whisper.cpp submodule and build whisper-cli"""
+    # Install to user directory so it persists after pip installation
+    user_home = pathlib.Path.home()
+    whispy_dir = user_home / ".whispy"
+    whisper_cpp_path = whispy_dir / "whisper.cpp"
     
-    def __init__(self, sourcedir="whisper.cpp"):
-        self.sourcedir = pathlib.Path(sourcedir).resolve()
+    # Create .whispy directory if it doesn't exist
+    whispy_dir.mkdir(exist_ok=True)
     
-    def build(self, build_temp, build_lib):
-        """Build the CMake project"""
-        build_temp = pathlib.Path(build_temp)
-        build_temp.mkdir(parents=True, exist_ok=True)
-
-        # Configure CMake
-        cmake_args = [
-            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={build_temp.absolute()}",
-            f"-DPYTHON_EXECUTABLE={sys.executable}",
+    print("\n" + "="*60)
+    print("Setting up whisper.cpp...")
+    print("="*60)
+    
+    # Check if whisper.cpp exists and has content
+    if not whisper_cpp_path.exists() or not any(whisper_cpp_path.iterdir()):
+        print("📦 Cloning whisper.cpp...")
+        try:
+            subprocess.check_call([
+                "git", "clone", 
+                "https://github.com/ggerganov/whisper.cpp.git",
+                str(whisper_cpp_path)
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("✓ Successfully cloned whisper.cpp")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to clone whisper.cpp: {e}")
+            print("You can clone it manually after installation:")
+            print("  git clone https://github.com/ggerganov/whisper.cpp.git")
+            return False
+    else:
+        print("✓ whisper.cpp already exists")
+    
+    # Build whisper-cli
+    print("🔨 Building whisper-cli...")
+    build_dir = whisper_cpp_path / "build"
+    
+    try:
+        # Configure with CMake
+        subprocess.check_call([
+            "cmake", "-B", str(build_dir), 
+            "-DCMAKE_BUILD_TYPE=Release",
             "-DWHISPER_BUILD_TESTS=OFF",
-            "-DWHISPER_BUILD_EXAMPLES=OFF",
-            "-DBUILD_SHARED_LIBS=ON",
-            "-DGGML_METAL=OFF",
-            "-DGGML_CUDA=OFF",
-            "-DGGML_OPENCL=OFF",
-            "-DGGML_VULKAN=OFF",
+            "-DWHISPER_BUILD_EXAMPLES=ON"
+        ], cwd=whisper_cpp_path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Build
+        subprocess.check_call([
+            "cmake", "--build", str(build_dir), 
+            "-j", "--config", "Release"
+        ], cwd=whisper_cpp_path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Check if whisper-cli was built
+        whisper_cli_paths = [
+            build_dir / "bin" / "whisper-cli",
+            build_dir / "whisper-cli",
+            build_dir / "examples" / "cli" / "whisper-cli"
         ]
-
-        # Platform-specific settings
-        if sys.platform == "darwin":
-            cmake_args.append("-DCMAKE_MACOSX_RPATH=ON")
-        elif sys.platform == "win32":
-            cmake_args.append("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE=" + str(build_temp.absolute()))
-
-        # Set the build type
-        cfg = "Release"
-        build_args = ["--config", cfg]
-        cmake_args += [f"-DCMAKE_BUILD_TYPE={cfg}"]
-
-        # Run CMake
-        subprocess.check_call(["cmake", str(self.sourcedir)] + cmake_args, cwd=build_temp)
-        subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=build_temp)
-
-        # Copy libraries to the package directory
-        build_lib_path = pathlib.Path(build_lib) / "whispy"
-        build_lib_path.mkdir(parents=True, exist_ok=True)
         
-        # Look for the library files
-        lib_patterns = ["libwhisper*.so", "libwhisper*.dylib", "whisper*.dll"]
-        library_found = False
+        whisper_cli_built = any(path.exists() for path in whisper_cli_paths)
         
-        for pattern in lib_patterns:
-            for lib in build_temp.glob(pattern):
-                dest_path = build_lib_path / lib.name
-                shutil.copy2(str(lib), str(dest_path))
-                library_found = True
-                print(f"Copied {lib.name} to {dest_path}")
-        
-        if not library_found:
-            # Also check subdirectories
-            for pattern in lib_patterns:
-                for lib in build_temp.rglob(pattern):
-                    dest_path = build_lib_path / lib.name
-                    shutil.copy2(str(lib), str(dest_path))
-                    library_found = True
-                    print(f"Copied {lib.name} to {dest_path}")
-        
-        if not library_found:
-            raise RuntimeError("Could not find compiled whisper library")
+        if whisper_cli_built:
+            print("✓ Successfully built whisper-cli")
+        else:
+            print("⚠ whisper-cli build completed but binary not found")
+            
+    except subprocess.CalledProcessError as e:
+        print(f"⚠ Failed to build whisper-cli: {e}")
+        print("You can build it manually after installation:")
+        print("  cd whisper.cpp && cmake -B build && cmake --build build -j --config Release")
+        return False
+    except FileNotFoundError:
+        print("❌ CMake not found. Please install CMake to build whisper-cli")
+        print("You can build it manually after installation:")
+        print("  cd whisper.cpp && cmake -B build && cmake --build build -j --config Release")
+        return False
+    
+    print("🎉 Setup complete!")
+    print(f"\nwhisper.cpp installed to: {whisper_cpp_path}")
+    print("\nNext steps:")
+    print(f"1. Download a model: cd {whisper_cpp_path} && sh ./models/download-ggml-model.sh base.en")
+    print("2. Test: whispy transcribe audio.wav")
+    print("="*60 + "\n")
+    
+    return True
 
-class CustomBuildPy(build_py):
-    """Custom build_py command that builds CMake project"""
+class PostInstallCommand(install):
+    """Post-installation command to set up whisper.cpp and build whisper-cli"""
     
     def run(self):
-        # Build the CMake project
-        cmake_build = CMakeBuild()
-        cmake_build.build(self.build_temp, self.build_lib)
+        # Run the normal installation first
+        install.run(self)
         
-        # Run the normal build_py
-        super().run()
+        # Then setup whisper.cpp
+        setup_whisper_cpp()
 
-class CustomDevelop(develop):
-    """Custom develop command that builds CMake project"""
+class PostDevelopCommand(develop):
+    """Post-develop command to set up whisper.cpp and build whisper-cli"""
     
     def run(self):
-        # Build the CMake project
-        cmake_build = CMakeBuild()
-        cmake_build.build("build/temp.cmake", "build/lib")
+        # Run the normal develop installation first
+        develop.run(self)
         
-        # Run the normal develop
-        super().run()
+        # Then setup whisper.cpp
+        setup_whisper_cpp()
 
 # The main setup configuration
 setup(
     name="whispy",
     packages=["whispy"],
     cmdclass={
-        "build_py": CustomBuildPy,
-        "develop": CustomDevelop,
+        "install": PostInstallCommand,
+        "develop": PostDevelopCommand,
     },
-    zip_safe=False,
+    zip_safe=True,
 ) 

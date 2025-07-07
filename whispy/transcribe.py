@@ -24,6 +24,17 @@ def find_whisper_cli() -> Optional[str]:
         "/opt/homebrew/bin/whisper-cli",
     ]
     
+    # Check user directory first (for pip installs)
+    user_home = pathlib.Path.home()
+    user_locations = [
+        user_home / ".whispy" / "whisper.cpp" / "build" / "bin" / "whisper-cli",
+        user_home / ".whispy" / "whisper.cpp" / "build" / "whisper-cli",
+    ]
+    
+    for cli_path in user_locations:
+        if cli_path.exists() and cli_path.is_file():
+            return str(cli_path)
+    
     # Check current directory and parent directories
     current_dir = pathlib.Path.cwd()
     for _ in range(3):  # Check up to 3 parent directories
@@ -111,6 +122,26 @@ def find_default_model() -> Optional[str]:
     Returns:
         Path to model file if found, None otherwise
     """
+    # Check user directory first (for pip installs)
+    user_home = pathlib.Path.home()
+    user_model_locations = [
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-base.en.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-base.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-small.en.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-small.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-tiny.en.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-tiny.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-medium.en.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-medium.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-large-v1.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-large-v2.bin",
+        user_home / ".whispy" / "whisper.cpp" / "models" / "ggml-large-v3.bin",
+    ]
+    
+    for model_path in user_model_locations:
+        if model_path.exists():
+            return str(model_path)
+    
     # Common model locations (prioritize better models)
     common_locations = [
         # Local models directory
@@ -146,16 +177,40 @@ def find_default_model() -> Optional[str]:
     return None
 
 
+def clone_whisper_cpp() -> bool:
+    """
+    Clone whisper.cpp repository if it doesn't exist
+    
+    Returns:
+        True if clone was successful, False otherwise
+    """
+    whisper_cpp_dir = pathlib.Path("whisper.cpp")
+    if whisper_cpp_dir.exists() and any(whisper_cpp_dir.iterdir()):
+        return True  # Already exists
+    
+    try:
+        subprocess.run(
+            ["git", "clone", "https://github.com/ggerganov/whisper.cpp.git", str(whisper_cpp_dir)],
+            check=True,
+            capture_output=True
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
 def build_whisper_cli() -> bool:
     """
-    Try to build whisper-cli if whisper.cpp directory exists
+    Try to build whisper-cli, cloning whisper.cpp if necessary
     
     Returns:
         True if build was successful, False otherwise
     """
-    whisper_cpp_dir = pathlib.Path("whisper.cpp")
-    if not whisper_cpp_dir.exists():
+    # First ensure whisper.cpp exists
+    if not clone_whisper_cpp():
         return False
+    
+    whisper_cpp_dir = pathlib.Path("whisper.cpp")
     
     try:
         # Run cmake to configure
