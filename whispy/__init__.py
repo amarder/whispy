@@ -69,13 +69,7 @@ def is_library_loaded() -> bool:
     """Check if the whisper library is loaded."""
     return _libwhisper is not None
 
-# Initialize the library on import
-try:
-    get_library()
-    print(f"Successfully loaded whisper library (whispy v{__version__})")
-except WhispyError as e:
-    print(f"Warning: Failed to load whisper library: {e}")
-    print("The library may not be built correctly. Try rebuilding with 'pip install -e .'")
+# Note: whispy now uses whisper-cli as a subprocess rather than loading the library directly
 
 # Export public API
 __all__ = [

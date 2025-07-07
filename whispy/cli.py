@@ -12,22 +12,20 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import __version__, WhispyError
-from .transcribe import transcribe_file, find_default_model
+from .transcribe import transcribe_file, find_default_model, find_whisper_cli, build_whisper_cli
 
 console = Console()
 app = typer.Typer(
     name="whispy",
     help="Fast speech recognition using whisper.cpp",
     add_completion=False,
-    invoke_without_command=True,
 )
 
 
-@app.callback()
-def main_callback(
-    ctx: typer.Context,
-    audio_file: Optional[str] = typer.Argument(
-        None, 
+@app.command(name="transcribe")
+def main_transcribe(
+    audio_file: str = typer.Argument(
+        ..., 
         help="Path to the audio file to transcribe"
     ),
     model: Optional[str] = typer.Option(
@@ -60,16 +58,7 @@ def main_callback(
         whispy audio.wav --language en --output transcript.txt
     """
     
-    # If no subcommand is provided and we have an audio file, do transcription
-    if ctx.invoked_subcommand is None:
-        if not audio_file:
-            console.print("[red]Error: Please provide an audio file to transcribe[/red]")
-            console.print("Usage: whispy [OPTIONS] AUDIO_FILE")
-            console.print("       whispy --help")
-            raise typer.Exit(1)
-        
-        # Call the transcribe function
-        return transcribe_audio(audio_file, model, language, output, verbose)
+    return transcribe_audio(audio_file, model, language, output, verbose)
 
 
 def transcribe_audio(
@@ -101,18 +90,41 @@ def transcribe_audio(
         if not model_path:
             console.print(
                 "[red]Error: No model file specified and no default model found.[/red]\n"
-                "Please provide a model file with --model or download a model to one of these locations:\n"
-                "  - models/ggml-base.en.bin\n"
-                "  - models/ggml-base.bin\n"
-                "  - models/ggml-small.en.bin\n"
-                "  - models/ggml-small.bin\n"
-                "  - models/ggml-tiny.en.bin\n"
-                "  - models/ggml-tiny.bin\n\n"
-                "You can download models from: https://huggingface.co/ggerganov/whisper.cpp"
+                "Please provide a model file with --model or download a model:\n\n"
+                "[bold]Option 1: Download to whisper.cpp/models/[/bold]\n"
+                "  cd whisper.cpp\n"
+                "  sh ./models/download-ggml-model.sh base.en\n\n"
+                "[bold]Option 2: Download to models/[/bold]\n"
+                "  mkdir -p models\n"
+                "  curl -L -o models/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n\n"
+                "Available models: tiny, tiny.en, base, base.en, small, small.en, medium, medium.en, large-v1, large-v2, large-v3"
+            )
+            raise typer.Exit(1)
+    
+    # Check if whisper-cli is available
+    whisper_cli = find_whisper_cli()
+    if not whisper_cli:
+        console.print("[yellow]whisper-cli not found. Attempting to build it...[/yellow]")
+        if build_whisper_cli():
+            whisper_cli = find_whisper_cli()
+            if whisper_cli:
+                console.print(f"[green]Successfully built whisper-cli: {whisper_cli}[/green]")
+            else:
+                console.print("[red]Failed to find whisper-cli after build[/red]")
+                raise typer.Exit(1)
+        else:
+            console.print(
+                "[red]Error: whisper-cli not found and build failed.[/red]\n"
+                "Please build whisper.cpp manually:\n"
+                "  cd whisper.cpp\n"
+                "  cmake -B build\n"
+                "  cmake --build build -j --config Release\n\n"
+                "Or ensure whisper-cli is in your PATH."
             )
             raise typer.Exit(1)
     
     if verbose:
+        console.print(f"[blue]Using whisper-cli: {whisper_cli}[/blue]")
         console.print(f"[blue]Using model: {model_path}[/blue]")
         console.print(f"[blue]Audio file: {audio_file}[/blue]")
         if language:
@@ -159,43 +171,6 @@ def transcribe_audio(
         console.print(transcript)
 
 
-@app.command()
-def transcribe(
-    audio_file: str = typer.Argument(
-        ..., 
-        help="Path to the audio file to transcribe"
-    ),
-    model: Optional[str] = typer.Option(
-        None,
-        "--model", "-m",
-        help="Path to the whisper model file. If not provided, will search for a default model."
-    ),
-    language: Optional[str] = typer.Option(
-        None,
-        "--language", "-l", 
-        help="Language code (e.g., 'en', 'es', 'fr'). If not provided, language will be auto-detected."
-    ),
-    output: Optional[str] = typer.Option(
-        None,
-        "--output", "-o",
-        help="Output file path. If not provided, prints to stdout."
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose", "-v",
-        help="Enable verbose output"
-    ),
-) -> None:
-    """
-    Transcribe an audio file to text using whisper.cpp
-    
-    Examples:
-        whispy transcribe audio.wav
-        whispy transcribe audio.mp3 --model models/ggml-base.en.bin
-        whispy transcribe audio.wav --language en --output transcript.txt
-    """
-    return transcribe_audio(audio_file, model, language, output, verbose)
-
 
 @app.command()
 def version() -> None:
@@ -204,12 +179,51 @@ def version() -> None:
 
 
 @app.command()
+def build() -> None:
+    """Build whisper-cli from whisper.cpp source"""
+    console.print("[blue]Building whisper-cli...[/blue]")
+    
+    if not pathlib.Path("whisper.cpp").exists():
+        console.print(
+            "[red]Error: whisper.cpp directory not found.[/red]\n"
+            "Please clone the whisper.cpp repository first:\n"
+            "  git clone https://github.com/ggerganov/whisper.cpp.git"
+        )
+        raise typer.Exit(1)
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Building whisper-cli...", total=None)
+        
+        if build_whisper_cli():
+            progress.update(task, description="Build complete!")
+            whisper_cli = find_whisper_cli()
+            if whisper_cli:
+                console.print(f"[green]Successfully built whisper-cli: {whisper_cli}[/green]")
+            else:
+                console.print("[red]Build succeeded but whisper-cli not found[/red]")
+                raise typer.Exit(1)
+        else:
+            progress.update(task, description="Build failed!")
+            console.print("[red]Failed to build whisper-cli[/red]")
+            raise typer.Exit(1)
+
+
+@app.command()
 def info() -> None:
     """Show system information"""
-    from . import is_library_loaded
-    
     console.print(f"[bold]whispy version:[/bold] {__version__}")
-    console.print(f"[bold]Library loaded:[/bold] {is_library_loaded()}")
+    
+    # Check whisper-cli availability
+    whisper_cli = find_whisper_cli()
+    if whisper_cli:
+        console.print(f"[bold]whisper-cli:[/bold] {whisper_cli}")
+    else:
+        console.print("[bold]whisper-cli:[/bold] [red]Not found[/red]")
     
     # Try to find available models
     model_path = find_default_model()
@@ -217,6 +231,13 @@ def info() -> None:
         console.print(f"[bold]Default model:[/bold] {model_path}")
     else:
         console.print("[bold]Default model:[/bold] [red]Not found[/red]")
+        
+    # Show whisper.cpp directory status
+    whisper_cpp_dir = pathlib.Path("whisper.cpp")
+    if whisper_cpp_dir.exists():
+        console.print(f"[bold]whisper.cpp directory:[/bold] {whisper_cpp_dir.absolute()}")
+    else:
+        console.print("[bold]whisper.cpp directory:[/bold] [red]Not found[/red]")
 
 
 def main() -> None:
