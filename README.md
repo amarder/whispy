@@ -143,6 +143,74 @@ whispy transcribe spanish_audio.wav --language es
 whispy transcribe podcast.mp3 --output transcript.txt --verbose
 ```
 
+## Testing
+
+Whispy includes a comprehensive test suite to ensure the CLI works correctly with different scenarios.
+
+### Running Tests
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run all tests
+pytest
+
+# Run tests with verbose output
+pytest -v
+
+# Run only unit tests
+pytest tests/test_unit.py
+
+# Run only CLI tests
+pytest tests/test_cli.py
+
+# Run tests with coverage
+pytest --cov=whispy --cov-report=html
+
+# Skip slow tests
+pytest --fast
+```
+
+### Test Categories
+
+- **Unit tests** (`tests/test_unit.py`): Test individual functions and modules
+- **CLI tests** (`tests/test_cli.py`): Test command-line interface functionality
+- **Integration tests**: Test full workflows with real audio files
+
+### Using the Test Runner
+
+```bash
+# Use the convenience script
+python run_tests.py --help
+
+# Run unit tests only
+python run_tests.py -t unit -v
+
+# Run with coverage
+python run_tests.py -c -v
+
+# Run fast tests only
+python run_tests.py -f
+```
+
+### Test Requirements
+
+- pytest >= 7.0.0
+- pytest-cov >= 4.0.0  
+- pytest-mock >= 3.10.0
+- Sample audio files (JFK sample from whisper.cpp)
+
+### What's Tested
+
+- ✅ CLI commands (help, version, info, transcribe)
+- ✅ Audio file transcription with sample files
+- ✅ Error handling for invalid files/models
+- ✅ Output file generation
+- ✅ Language options and verbose modes
+- ✅ System requirements and binary detection
+- ✅ Model file discovery and validation
+
 ## Development
 
 ### Project Structure

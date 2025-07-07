@@ -32,6 +32,13 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+]
+
 [project.scripts]
 whispy = "whispy.cli:app"
 
@@ -46,4 +53,15 @@ include = ["whispy*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-whispy = ["*.so", "*.dylib", "*.dll"] 
+whispy = ["*.so", "*.dylib", "*.dll"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+] 
