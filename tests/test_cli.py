@@ -7,6 +7,7 @@ import tempfile
 import pytest
 from pathlib import Path
 from typer.testing import CliRunner
+from unittest.mock import patch
 from whispy.cli import app
 from whispy.transcribe import find_whisper_cli, find_default_model
 
@@ -187,6 +188,130 @@ class TestErrorHandling:
         
         # Should fail gracefully
         assert result.exit_code != 0
+
+
+class TestRecordAndTranscribeCommand:
+    """Test the record-and-transcribe command."""
+
+    def test_record_and_transcribe_help(self, runner):
+        """Test the record-and-transcribe command help."""
+        result = runner.invoke(app, ["record-and-transcribe", "--help"])
+        assert result.exit_code == 0
+        assert "record audio from microphone" in result.stdout.lower()
+        assert "--test-mic" in result.stdout
+        assert "--save-audio" in result.stdout
+
+    @patch('whispy.cli.test_microphone')
+    def test_record_and_transcribe_test_mic_success(self, mock_test_mic, runner):
+        """Test record-and-transcribe with successful mic test."""
+        mock_test_mic.return_value = True
+        
+        result = runner.invoke(app, ["record-and-transcribe", "--test-mic"])
+        
+        assert result.exit_code == 0
+        assert "microphone test passed" in result.stdout.lower()
+        mock_test_mic.assert_called_once()
+
+    @patch('whispy.cli.test_microphone')
+    def test_record_and_transcribe_test_mic_failure(self, mock_test_mic, runner):
+        """Test record-and-transcribe with failed mic test."""
+        mock_test_mic.return_value = False
+        
+        result = runner.invoke(app, ["record-and-transcribe", "--test-mic"])
+        
+        assert result.exit_code == 1
+        assert "microphone test failed" in result.stdout.lower()
+        mock_test_mic.assert_called_once()
+
+    @patch('whispy.cli.check_audio_devices')
+    @patch('whispy.cli.record_audio_until_interrupt')
+    @patch('whispy.cli.transcribe_audio')
+    @patch('whispy.cli.pathlib.Path.unlink')
+    def test_record_and_transcribe_basic(
+        self, 
+        mock_unlink,
+        mock_transcribe_audio,
+        mock_record_audio,
+        mock_check_devices,
+        runner
+    ):
+        """Test basic record-and-transcribe functionality."""
+        # Setup mocks
+        mock_check_devices.return_value = {
+            'default_input_info': {'name': 'Test Microphone'}
+        }
+        mock_record_audio.return_value = "/tmp/test_recording.wav"
+        
+        result = runner.invoke(app, ["record-and-transcribe", "--verbose"])
+        
+        assert result.exit_code == 0
+        mock_check_devices.assert_called_once()
+        mock_record_audio.assert_called_once()
+        mock_transcribe_audio.assert_called_once()
+        mock_unlink.assert_called_once()  # Cleanup temporary file
+
+    @patch('whispy.cli.check_audio_devices')
+    @patch('whispy.cli.record_audio_until_interrupt')
+    @patch('whispy.cli.transcribe_audio')
+    def test_record_and_transcribe_save_audio(
+        self,
+        mock_transcribe_audio,
+        mock_record_audio,
+        mock_check_devices,
+        runner
+    ):
+        """Test record-and-transcribe with save audio option."""
+        mock_check_devices.return_value = {
+            'default_input_info': {'name': 'Test Microphone'}
+        }
+        mock_record_audio.return_value = "/tmp/test_recording.wav"
+        
+        result = runner.invoke(app, [
+            "record-and-transcribe", 
+            "--save-audio", "my_recording.wav"
+        ])
+        
+        assert result.exit_code == 0
+        # Should call record_audio with the specified output path
+        mock_record_audio.assert_called_once_with(output_path="my_recording.wav")
+
+    @patch('whispy.cli.check_audio_devices')
+    @patch('whispy.cli.record_audio_until_interrupt')
+    def test_record_and_transcribe_keyboard_interrupt(
+        self,
+        mock_record_audio,
+        mock_check_devices,
+        runner
+    ):
+        """Test record-and-transcribe with keyboard interrupt."""
+        mock_check_devices.return_value = {
+            'default_input_info': {'name': 'Test Microphone'}
+        }
+        mock_record_audio.side_effect = KeyboardInterrupt()
+        
+        result = runner.invoke(app, ["record-and-transcribe"])
+        
+        assert result.exit_code == 130  # Standard Ctrl+C exit code
+        assert "cancelled by user" in result.stdout.lower()
+
+    @patch('whispy.cli.check_audio_devices')
+    def test_record_and_transcribe_device_check_warning(
+        self,
+        mock_check_devices,
+        runner
+    ):
+        """Test record-and-transcribe with device check warning."""
+        mock_check_devices.side_effect = Exception("Device error")
+        
+        # Should continue with a warning
+        with patch('whispy.cli.record_audio_until_interrupt') as mock_record:
+            with patch('whispy.cli.transcribe_audio') as mock_transcribe:
+                mock_record.return_value = "/tmp/test.wav"
+                
+                result = runner.invoke(app, ["record-and-transcribe"])
+                
+                assert result.exit_code == 0
+                assert "warning" in result.stdout.lower()
 
 
 class TestIntegration:

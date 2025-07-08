@@ -58,6 +58,24 @@ cmake --build build -j --config Release
 cd ..
 ```
 
+### Requirements
+
+**Basic requirements:**
+- Python 3.7+
+- CMake (for building whisper.cpp)
+- C++ compiler (gcc, clang, or MSVC)
+- Git
+
+**For audio recording features:**
+- Microphone access
+- Audio drivers (pre-installed on most systems)
+- Additional Python packages: `sounddevice`, `numpy`, `scipy`
+
+**Supported platforms:**
+- 🍎 macOS (Intel & Apple Silicon) with CoreAudio
+- 🐧 Linux (with ALSA/PulseAudio) 
+- 🪟 Windows (with DirectSound)
+
 ### Download a model
 
 After installation, download a model to use for transcription:
@@ -95,6 +113,27 @@ whispy transcribe audio.wav --output transcript.txt
 
 # Verbose output
 whispy transcribe audio.wav --verbose
+```
+
+### Record and transcribe
+
+Record audio from your microphone and transcribe it in real-time:
+
+```bash
+# Record and transcribe (press Ctrl+C to stop recording)
+whispy record-and-transcribe
+
+# Test microphone before recording
+whispy record-and-transcribe --test-mic
+
+# Record with specific model and language
+whispy record-and-transcribe --model models/ggml-base.en.bin --language en
+
+# Save both transcript and audio
+whispy record-and-transcribe --output transcript.txt --save-audio recording.wav
+
+# Verbose output with device information
+whispy record-and-transcribe --verbose
 ```
 
 ### System information
@@ -141,6 +180,19 @@ whispy transcribe spanish_audio.wav --language es
 
 # Save results and show details
 whispy transcribe podcast.mp3 --output transcript.txt --verbose
+
+# Record and transcribe in real-time
+whispy record-and-transcribe
+
+# Record with high-quality model and save everything
+whispy record-and-transcribe \
+  --model whisper.cpp/models/ggml-large-v3.bin \
+  --output meeting-notes.txt \
+  --save-audio meeting-recording.wav \
+  --verbose
+
+# Quick voice memo transcription
+whispy record-and-transcribe --language en --output memo.txt
 ```
 
 ## Testing
@@ -203,9 +255,12 @@ python run_tests.py -f
 
 ### What's Tested
 
-- ✅ CLI commands (help, version, info, transcribe)
+- ✅ CLI commands (help, version, info, transcribe, record-and-transcribe)
 - ✅ Audio file transcription with sample files
-- ✅ Error handling for invalid files/models
+- ✅ Audio recording from microphone
+- ✅ Real-time record-and-transcribe workflow
+- ✅ Microphone testing functionality
+- ✅ Error handling for invalid files/models/devices
 - ✅ Output file generation
 - ✅ Language options and verbose modes
 - ✅ System requirements and binary detection

@@ -13,6 +13,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import __version__, WhispyError
 from .transcribe import transcribe_file, find_default_model, find_whisper_cli, build_whisper_cli
+from .recorder import record_audio_until_interrupt, check_audio_devices, test_microphone
 
 console = Console()
 app = typer.Typer(
@@ -170,6 +171,115 @@ def transcribe_audio(
     else:
         console.print(transcript)
 
+
+@app.command(name="record-and-transcribe")
+def record_and_transcribe(
+    model: Optional[str] = typer.Option(
+        None,
+        "--model", "-m",
+        help="Path to the whisper model file. If not provided, will search for a default model."
+    ),
+    language: Optional[str] = typer.Option(
+        None,
+        "--language", "-l", 
+        help="Language code (e.g., 'en', 'es', 'fr'). If not provided, language will be auto-detected."
+    ),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Output file path. If not provided, prints to stdout."
+    ),
+    save_audio: Optional[str] = typer.Option(
+        None,
+        "--save-audio", "-s",
+        help="Save the recorded audio to this file (optional)"
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose", "-v",
+        help="Enable verbose output"
+    ),
+    test_mic: bool = typer.Option(
+        False,
+        "--test-mic", "-t",
+        help="Test microphone before recording"
+    ),
+) -> None:
+    """
+    Record audio from microphone and transcribe it
+    
+    Records audio until you press Ctrl+C, then transcribes the recording.
+    
+    Examples:
+        whispy record-and-transcribe
+        whispy record-and-transcribe --model models/ggml-base.en.bin
+        whispy record-and-transcribe --language en --output transcript.txt
+        whispy record-and-transcribe --save-audio recording.wav
+        whispy record-and-transcribe --test-mic
+    """
+    
+    # Test microphone if requested
+    if test_mic:
+        if not test_microphone():
+            console.print("[red]❌ Microphone test failed. Please check your microphone settings.[/red]")
+            raise typer.Exit(1)
+        console.print("[green]✅ Microphone test passed![/green]")
+        return
+    
+    # Check audio devices
+    try:
+        device_info = check_audio_devices()
+        if verbose:
+            console.print(f"[blue]Default input device: {device_info['default_input_info']['name']}[/blue]")
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not check audio devices: {e}[/yellow]")
+    
+    # Record audio
+    console.print("[bold blue]🎤 Ready to record audio[/bold blue]")
+    console.print("[blue]Press Ctrl+C to stop recording and start transcription[/blue]")
+    
+    try:
+        audio_file = record_audio_until_interrupt(
+            output_path=save_audio
+        )
+        
+        if verbose:
+            console.print(f"[blue]Recorded audio saved to: {audio_file}[/blue]")
+        
+        # Now transcribe the recorded audio
+        console.print("[bold blue]🔄 Starting transcription...[/bold blue]")
+        
+        # Use the existing transcribe function
+        transcribe_audio(
+            audio_file=audio_file,
+            model=model,
+            language=language,
+            output=output,
+            verbose=verbose
+        )
+        
+        # Clean up temporary file if not saving audio
+        if save_audio is None:
+            try:
+                pathlib.Path(audio_file).unlink()
+                if verbose:
+                    console.print(f"[blue]Cleaned up temporary file: {audio_file}[/blue]")
+            except Exception as e:
+                if verbose:
+                    console.print(f"[yellow]Warning: Could not clean up temporary file: {e}[/yellow]")
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Recording cancelled by user[/yellow]")
+        raise typer.Exit(130)  # Standard exit code for Ctrl+C
+    except WhispyError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected error: {e}[/red]")
+        if verbose:
+            import traceback
+            console.print(traceback.format_exc())
+        raise typer.Exit(1)
 
 
 @app.command()
