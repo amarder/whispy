@@ -10,6 +10,8 @@ import signal
 import tempfile
 import threading
 import time
+import wave
+import struct
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -41,37 +43,57 @@ class AudioRecorder:
         self.sample_rate = sample_rate
         self.channels = channels
         self.recording = False
-        self.audio_data = []
         self.stream = None
         self.show_volume = show_volume
         self.current_volume = 0.0
         self.peak_volume = 0.0
         self.console = Console()
+        self.wav_file = None
+        self.output_path = None
+        self.frames_recorded = 0
         
     def _audio_callback(self, indata, frames, time, status):
         """Callback function for audio stream."""
         if status:
             print(f"Recording status: {status}")
         
-        if self.recording:
-            self.audio_data.append(indata.copy())
+        if self.recording and self.wav_file:
+            # Convert audio data to the proper format
+            audio_data = indata[:, 0] if indata.ndim > 1 else indata.flatten()
+            
+            # Convert float32 to int16 for WAV format
+            audio_int16 = (audio_data * 32767).astype(np.int16)
+            
+            # Write audio data directly to WAV file
+            try:
+                self.wav_file.writeframes(audio_int16.tobytes())
+                self.frames_recorded += len(audio_int16)
+            except Exception as e:
+                print(f"Error writing audio data: {e}")
             
             # Calculate volume for display
             if self.show_volume:
-                audio_data = indata[:, 0] if indata.ndim > 1 else indata.flatten()
                 rms = np.sqrt(np.mean(audio_data ** 2))
                 self.current_volume = rms
                 self.peak_volume = max(self.peak_volume, rms)
     
-    def start_recording(self) -> None:
+    def start_recording(self, output_path: str) -> None:
         """Start recording audio from the microphone."""
         if self.recording:
             return
         
-        self.recording = True
-        self.audio_data = []
+        self.output_path = output_path
+        self.frames_recorded = 0
+        self.peak_volume = 0.0
+        self.current_volume = 0.0
         
         try:
+            # Open WAV file for writing
+            self.wav_file = wave.open(output_path, 'wb')
+            self.wav_file.setnchannels(self.channels)
+            self.wav_file.setsampwidth(2)  # 16-bit audio (2 bytes per sample)
+            self.wav_file.setframerate(self.sample_rate)
+            
             # Create audio stream
             self.stream = sd.InputStream(
                 samplerate=self.sample_rate,
@@ -80,60 +102,57 @@ class AudioRecorder:
                 dtype=np.float32
             )
             self.stream.start()
+            self.recording = True
             
         except Exception as e:
             self.recording = False
+            if self.wav_file:
+                try:
+                    self.wav_file.close()
+                except:
+                    pass
+                self.wav_file = None
             raise WhispyError(f"Failed to start recording: {e}")
     
-    def stop_recording(self) -> np.ndarray:
+    def stop_recording(self) -> str:
         """
-        Stop recording and return the audio data.
+        Stop recording and finalize the audio file.
         
         Returns:
-            Audio data as numpy array
+            Path to the saved audio file
         """
         if not self.recording:
-            return np.array([])
+            return self.output_path or ""
         
         self.recording = False
         
+        # Stop and close audio stream
         if self.stream:
             self.stream.stop()
             self.stream.close()
             self.stream = None
         
-        if not self.audio_data:
-            return np.array([])
+        # Close WAV file
+        if self.wav_file:
+            try:
+                self.wav_file.close()
+            except Exception as e:
+                print(f"Warning: Error closing WAV file: {e}")
+            finally:
+                self.wav_file = None
         
-        # Concatenate all audio chunks
-        audio_array = np.concatenate(self.audio_data, axis=0)
-        
-        # Convert to proper format for wav file
-        if self.channels == 1:
-            audio_array = audio_array.flatten()
-        
-        return audio_array
+        return self.output_path or ""
     
-    def save_recording(self, audio_data: np.ndarray, output_path: str) -> None:
+    def get_recording_duration(self) -> float:
         """
-        Save audio data to a WAV file.
+        Get the duration of the recorded audio.
         
-        Args:
-            audio_data: Audio data as numpy array
-            output_path: Path to save the WAV file
+        Returns:
+            Duration in seconds
         """
-        if len(audio_data) == 0:
-            raise WhispyError("No audio data to save")
-        
-        try:
-            # Convert float32 to int16 for WAV format
-            audio_int16 = (audio_data * 32767).astype(np.int16)
-            
-            # Save as WAV file
-            wavfile.write(output_path, self.sample_rate, audio_int16)
-            
-        except Exception as e:
-            raise WhispyError(f"Failed to save audio file: {e}")
+        if self.frames_recorded == 0:
+            return 0.0
+        return self.frames_recorded / self.sample_rate
     
     def _create_volume_display(self) -> Panel:
         """Create a visual volume indicator panel."""
@@ -216,8 +235,9 @@ def record_audio_until_interrupt(
     try:
         console.print("🎤 [bold blue]Starting audio recording...[/bold blue]")
         console.print("🔴 [blue]Recording in progress - Press Ctrl+C to stop[/blue]")
+        console.print("💾 [green]Audio is being saved in real-time![/green]")
         
-        recorder.start_recording()
+        recorder.start_recording(output_path)
         
         # Show volume indicator if enabled
         if show_volume:
@@ -237,18 +257,18 @@ def record_audio_until_interrupt(
             # Wait for interrupt signal without volume display
             recording_stopped.wait()
         
-        console.print("\n💾 [yellow]Saving recording...[/yellow]")
-        audio_data = recorder.stop_recording()
+        console.print("\n⏹️  [yellow]Finalizing recording...[/yellow]")
+        final_path = recorder.stop_recording()
         
-        if len(audio_data) > 0:
-            recorder.save_recording(audio_data, output_path)
-            duration = len(audio_data) / sample_rate
-            console.print(f"✅ [green]Recording saved:[/green] {output_path}")
+        # Check if we have any data
+        duration = recorder.get_recording_duration()
+        if duration > 0:
+            console.print(f"✅ [green]Recording saved:[/green] {final_path}")
             console.print(f"📊 [blue]Duration:[/blue] {duration:.2f} seconds")
             if show_volume and hasattr(recorder, 'peak_volume') and isinstance(recorder.peak_volume, (int, float)):
                 peak_percent = min(100, recorder.peak_volume * 1000)
                 console.print(f"📈 [cyan]Peak volume:[/cyan] {peak_percent:.1f}%")
-            return output_path
+            return final_path
         else:
             console.print("⚠️  [yellow]No audio data recorded[/yellow]")
             # Clean up empty file
@@ -259,11 +279,12 @@ def record_audio_until_interrupt(
     except KeyboardInterrupt:
         # This shouldn't happen with signal handler, but just in case
         console.print("\n🛑 [yellow]Recording interrupted[/yellow]")
-        audio_data = recorder.stop_recording()
+        final_path = recorder.stop_recording()
         
-        if len(audio_data) > 0:
-            recorder.save_recording(audio_data, output_path)
-            return output_path
+        duration = recorder.get_recording_duration()
+        if duration > 0:
+            console.print(f"✅ [green]Partial recording saved:[/green] {final_path}")
+            return final_path
         else:
             if os.path.exists(output_path):
                 os.unlink(output_path)
@@ -309,28 +330,44 @@ def test_microphone() -> bool:
     """
     try:
         print("🎤 Testing microphone...")
-        recorder = AudioRecorder()
+        recorder = AudioRecorder(show_volume=False)  # Disable volume display for test
         
-        recorder.start_recording()
+        # Create a temporary file for the test
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix='.wav',
+            delete=False,
+            prefix='whispy_mic_test_'
+        )
+        test_path = temp_file.name
+        temp_file.close()
         
-        # Record for 1 second
-        import time
-        time.sleep(1)
-        
-        audio_data = recorder.stop_recording()
-        
-        if len(audio_data) > 0:
-            # Check if there's actual audio (not just silence)
-            rms = np.sqrt(np.mean(audio_data ** 2))
-            if rms > 0.001:  # Threshold for detecting audio
-                print("✅ Microphone is working!")
-                return True
+        try:
+            recorder.start_recording(test_path)
+            
+            # Record for 1 second
+            time.sleep(1)
+            
+            recorder.stop_recording()
+            
+            # Check if we recorded any audio
+            duration = recorder.get_recording_duration()
+            if duration > 0:
+                # Check if there's actual audio (not just silence)
+                if recorder.peak_volume > 0.001:  # Threshold for detecting audio
+                    print("✅ Microphone is working!")
+                    return True
+                else:
+                    print("⚠️  Microphone detected but no audio signal")
+                    return False
             else:
-                print("⚠️  Microphone detected but no audio signal")
+                print("❌ No audio data captured")
                 return False
-        else:
-            print("❌ No audio data captured")
-            return False
+        finally:
+            # Clean up test file
+            try:
+                os.unlink(test_path)
+            except:
+                pass
             
     except Exception as e:
         print(f"❌ Microphone test failed: {e}")

@@ -27,20 +27,26 @@ class TestAudioRecorder:
         assert recorder.sample_rate == 22050
         assert recorder.channels == 2
         assert recorder.recording is False
-        assert recorder.audio_data == []
         assert recorder.stream is None
+        assert recorder.wav_file is None
+        assert recorder.output_path is None
+        assert recorder.frames_recorded == 0
 
     @patch('whispy.recorder.sd.InputStream')
-    def test_start_recording(self, mock_stream_class):
+    @patch('whispy.recorder.wave.open')
+    def test_start_recording(self, mock_wave_open, mock_stream_class):
         """Test starting recording."""
         mock_stream = MagicMock()
         mock_stream_class.return_value = mock_stream
+        mock_wav_file = MagicMock()
+        mock_wave_open.return_value = mock_wav_file
         
         recorder = AudioRecorder()
-        recorder.start_recording()
+        recorder.start_recording("/tmp/test.wav")
         
         assert recorder.recording is True
-        assert recorder.audio_data == []
+        assert recorder.output_path == "/tmp/test.wav"
+        mock_wave_open.assert_called_once_with("/tmp/test.wav", 'wb')
         mock_stream_class.assert_called_once()
         mock_stream.start.assert_called_once()
 
@@ -50,18 +56,21 @@ class TestAudioRecorder:
         recorder.recording = True
         
         # Should not raise an error, just return
-        recorder.start_recording()
+        recorder.start_recording("/tmp/test.wav")
         assert recorder.recording is True
 
     @patch('whispy.recorder.sd.InputStream')
-    def test_start_recording_failure(self, mock_stream_class):
+    @patch('whispy.recorder.wave.open')
+    def test_start_recording_failure(self, mock_wave_open, mock_stream_class):
         """Test recording start failure."""
+        mock_wav_file = MagicMock()
+        mock_wave_open.return_value = mock_wav_file
         mock_stream_class.side_effect = Exception("Audio device error")
         
         recorder = AudioRecorder()
         
         with pytest.raises(Exception):  # WhispyError
-            recorder.start_recording()
+            recorder.start_recording("/tmp/test.wav")
         
         assert recorder.recording is False
 
@@ -71,24 +80,20 @@ class TestAudioRecorder:
         
         result = recorder.stop_recording()
         
-        assert isinstance(result, np.ndarray)
-        assert len(result) == 0
+        assert isinstance(result, str)
+        assert result == ""
 
-    @patch('whispy.recorder.sd.InputStream')
-    def test_stop_recording_with_data(self, mock_stream_class):
+    def test_stop_recording_with_data(self):
         """Test stopping recording with audio data."""
         mock_stream = MagicMock()
-        mock_stream_class.return_value = mock_stream
+        mock_wav_file = MagicMock()
         
         recorder = AudioRecorder()
         recorder.recording = True
         recorder.stream = mock_stream
-        
-        # Add some fake audio data
-        recorder.audio_data = [
-            np.array([[0.1], [0.2]]),
-            np.array([[0.3], [0.4]])
-        ]
+        recorder.wav_file = mock_wav_file
+        recorder.output_path = "/tmp/test.wav"
+        recorder.frames_recorded = 1000  # Simulate some recorded frames
         
         result = recorder.stop_recording()
         
@@ -96,47 +101,27 @@ class TestAudioRecorder:
         mock_stream.stop.assert_called_once()
         mock_stream.close.assert_called_once()
         assert recorder.stream is None
+        mock_wav_file.close.assert_called_once()
         
-        # Check that audio data was concatenated and flattened
-        assert isinstance(result, np.ndarray)
-        assert len(result) == 4  # 2 samples * 2 chunks
+        # Check that result is the output path
+        assert isinstance(result, str)
+        assert result == "/tmp/test.wav"
 
-    @patch('whispy.recorder.wavfile.write')
-    def test_save_recording(self, mock_wavfile_write):
-        """Test saving recording to file."""
-        recorder = AudioRecorder()
-        audio_data = np.array([0.1, 0.2, 0.3, 0.4])
-        output_path = "test_output.wav"
-        
-        recorder.save_recording(audio_data, output_path)
-        
-        # Check that wavfile.write was called with correct parameters
-        mock_wavfile_write.assert_called_once()
-        call_args = mock_wavfile_write.call_args
-        
-        assert call_args[0][0] == output_path  # filename
-        assert call_args[0][1] == recorder.sample_rate  # sample rate
-        # Audio data should be converted to int16
-        expected_audio = (audio_data * 32767).astype(np.int16)
-        np.testing.assert_array_equal(call_args[0][2], expected_audio)
-
-    def test_save_recording_empty_data(self):
-        """Test saving empty recording."""
+    def test_get_recording_duration(self):
+        """Test getting recording duration."""
         recorder = AudioRecorder()
         
-        with pytest.raises(Exception):  # WhispyError
-            recorder.save_recording(np.array([]), "test.wav")
-
-    @patch('whispy.recorder.wavfile.write')
-    def test_save_recording_failure(self, mock_wavfile_write):
-        """Test save recording failure."""
-        mock_wavfile_write.side_effect = Exception("Write error")
+        # Test with no recorded frames
+        assert recorder.get_recording_duration() == 0.0
         
-        recorder = AudioRecorder()
-        audio_data = np.array([0.1, 0.2])
+        # Test with some recorded frames
+        recorder.frames_recorded = 16000  # 1 second at 16kHz
+        assert recorder.get_recording_duration() == 1.0
         
-        with pytest.raises(Exception):  # WhispyError
-            recorder.save_recording(audio_data, "test.wav")
+        # Test with different sample rate
+        recorder.sample_rate = 44100
+        recorder.frames_recorded = 44100  # 1 second at 44.1kHz  
+        assert recorder.get_recording_duration() == 1.0
 
 
 class TestRecordingFunctions:
@@ -159,7 +144,9 @@ class TestRecordingFunctions:
         
         mock_recorder = MagicMock()
         mock_recorder_class.return_value = mock_recorder
-        mock_recorder.stop_recording.return_value = np.array([0.1, 0.2, 0.3])
+        mock_recorder.stop_recording.return_value = "/tmp/test_recording.wav"
+        mock_recorder.get_recording_duration.return_value = 5.0  # 5 seconds
+        mock_recorder.peak_volume = 0.5  # Some volume
         
         # Mock the recording process
         with patch('whispy.recorder.threading.Event') as mock_event_class:
@@ -170,10 +157,10 @@ class TestRecordingFunctions:
             
             # Check that the process was set up correctly
             mock_recorder_class.assert_called_once()
-            mock_recorder.start_recording.assert_called_once()
+            mock_recorder.start_recording.assert_called_once_with("/tmp/test_recording.wav")
             mock_event.wait.assert_called_once()
             mock_recorder.stop_recording.assert_called_once()
-            mock_recorder.save_recording.assert_called_once()
+            mock_recorder.get_recording_duration.assert_called_once()
             
             assert result == "/tmp/test_recording.wav"
 
@@ -206,22 +193,31 @@ class TestRecordingFunctions:
             check_audio_devices()
 
     @patch('whispy.recorder.AudioRecorder')
-    @patch('time.sleep')
-    def test_test_microphone_working(self, mock_sleep, mock_recorder_class):
+    @patch('whispy.recorder.time.sleep')
+    @patch('whispy.recorder.tempfile.NamedTemporaryFile')
+    @patch('os.unlink')
+    def test_test_microphone_working(self, mock_unlink, mock_tempfile, mock_sleep, mock_recorder_class):
         """Test microphone test when working."""
         mock_recorder = MagicMock()
         mock_recorder_class.return_value = mock_recorder
         
-        # Simulate audio with some signal
-        audio_data = np.array([0.1, 0.2, 0.1, 0.2] * 1000)  # Repeating pattern
-        mock_recorder.stop_recording.return_value = audio_data
+        # Setup tempfile mock
+        mock_temp = MagicMock()
+        mock_temp.name = "/tmp/test_mic.wav"
+        mock_tempfile.return_value = mock_temp
+        
+        # Simulate successful recording with audio signal
+        mock_recorder.get_recording_duration.return_value = 1.0  # 1 second recorded
+        mock_recorder.peak_volume = 0.1  # Above threshold (0.001)
         
         result = test_microphone()
         
         assert result is True
-        mock_recorder.start_recording.assert_called_once()
+        mock_recorder_class.assert_called_once_with(show_volume=False)
+        mock_recorder.start_recording.assert_called_once_with("/tmp/test_mic.wav")
         mock_sleep.assert_called_once_with(1)
         mock_recorder.stop_recording.assert_called_once()
+        mock_unlink.assert_called_once()
 
     @patch('whispy.recorder.AudioRecorder')
     @patch('time.sleep')
