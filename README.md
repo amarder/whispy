@@ -2,6 +2,8 @@
 
 A fast and efficient command-line interface for [whisper.cpp](https://github.com/ggerganov/whisper.cpp), providing automatic speech recognition with GPU acceleration.
 
+[![Watch the video](https://img.youtube.com/vi/O6lGEreTbzg/0.jpg)](https://www.youtube.com/watch?v=O6lGEreTbzg)
+
 ## Features
 
 - 🚀 **Fast transcription** using whisper.cpp with GPU acceleration (Metal on macOS, CUDA on Linux/Windows)
