@@ -8,8 +8,9 @@ import sys
 from typing import Optional
 
 import typer
+import pyperclip
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
@@ -141,18 +142,25 @@ def transcribe_audio(
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
             console=console,
             transient=True,
         ) as progress:
-            task = progress.add_task("Transcribing audio...", total=None)
+            task = progress.add_task("Transcribing audio...", total=100)
+            
+            def update_progress(progress_value: float):
+                progress.update(task, completed=progress_value * 100)
             
             transcript = transcribe_file(
                 audio_path=str(audio_path),
                 model_path=model_path,
-                language=language
+                language=language,
+                progress_callback=update_progress
             )
             
-            progress.update(task, description="Transcription complete!")
+            progress.update(task, description="Transcription complete!", completed=100)
     
     except WhispyError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -163,6 +171,14 @@ def transcribe_audio(
             import traceback
             console.print(traceback.format_exc())
         raise typer.Exit(1)
+    
+    # Copy to clipboard
+    try:
+        pyperclip.copy(transcript)
+        console.print("📋 [green]Transcript copied to clipboard![/green]")
+    except Exception as e:
+        if verbose:
+            console.print(f"[yellow]Warning: Could not copy to clipboard: {e}[/yellow]")
     
     # Output the result
     if output:
@@ -177,7 +193,7 @@ def transcribe_audio(
         console.print(transcript)
 
 
-@app.command(name="record-and-transcribe")
+@app.command(name="record")
 def record_and_transcribe(
     model: Optional[str] = typer.Option(
         None,
@@ -209,11 +225,18 @@ def record_and_transcribe(
         "--test-mic", "-t",
         help="Test microphone before recording"
     ),
+    no_volume_indicator: bool = typer.Option(
+        False,
+        "--no-volume-indicator",
+        help="Disable real-time volume indicator during recording"
+    ),
 ) -> None:
     """
     Record audio from microphone and transcribe it
     
     Records audio until you press Ctrl+C, then transcribes the recording.
+    Features a real-time volume indicator during recording, progress bar
+    during transcription, and automatically copies the result to clipboard.
     
     Examples:
         whispy record-and-transcribe
@@ -221,6 +244,7 @@ def record_and_transcribe(
         whispy record-and-transcribe --language en --output transcript.txt
         whispy record-and-transcribe --save-audio recording.wav
         whispy record-and-transcribe --test-mic
+        whispy record-and-transcribe --no-volume-indicator
     """
     
     # Test microphone if requested
@@ -245,7 +269,8 @@ def record_and_transcribe(
     
     try:
         audio_file = record_audio_until_interrupt(
-            output_path=save_audio
+            output_path=save_audio,
+            show_volume=not no_volume_indicator  # Volume indicator enabled by default
         )
         
         if verbose:

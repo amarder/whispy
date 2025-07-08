@@ -3,7 +3,9 @@ import pathlib
 import subprocess
 import json
 import tempfile
-from typing import List, Optional, Union
+import threading
+import time
+from typing import List, Optional, Union, Callable
 from . import WhispyError
 
 
@@ -53,7 +55,12 @@ def find_whisper_cli() -> Optional[str]:
     return None
 
 
-def transcribe_file(audio_path: str, model_path: str, language: Optional[str] = None) -> str:
+def transcribe_file(
+    audio_path: str, 
+    model_path: str, 
+    language: Optional[str] = None,
+    progress_callback: Optional[Callable[[float], None]] = None
+) -> str:
     """
     Transcribe an audio file using whisper-cli
     
@@ -61,6 +68,7 @@ def transcribe_file(audio_path: str, model_path: str, language: Optional[str] = 
         audio_path: Path to the audio file
         model_path: Path to the whisper model file
         language: Language code (optional)
+        progress_callback: Callback function to report progress (0.0 to 1.0)
         
     Returns:
         Transcribed text
@@ -93,7 +101,35 @@ def transcribe_file(audio_path: str, model_path: str, language: Optional[str] = 
     if language:
         cmd.extend(["-l", language])
     
+    # Progress tracking setup
+    start_time = time.time()
+    process_completed = threading.Event()
+    
     try:
+        # Estimate processing time based on audio duration and file size
+        audio_file_size = os.path.getsize(audio_path)
+        
+        def progress_tracker():
+            """Track progress based on estimated duration."""
+            # Rough estimation: ~2-4x real-time for transcription
+            # Adjust this based on your system performance
+            estimated_duration = max(5.0, audio_file_size / 1024 / 1024 * 8)  # Basic heuristic
+            
+            while not process_completed.is_set():
+                elapsed = time.time() - start_time
+                progress = min(0.95, elapsed / estimated_duration)  # Cap at 95% until completion
+                
+                if progress_callback:
+                    progress_callback(progress)
+                
+                time.sleep(0.5)
+        
+        # Start progress tracking thread if callback provided
+        progress_thread = None
+        if progress_callback:
+            progress_thread = threading.Thread(target=progress_tracker, daemon=True)
+            progress_thread.start()
+        
         # Run whisper-cli and capture stdout
         result = subprocess.run(
             cmd,
@@ -101,6 +137,15 @@ def transcribe_file(audio_path: str, model_path: str, language: Optional[str] = 
             text=True,
             check=True
         )
+        
+        # Mark process as completed
+        process_completed.set()
+        
+        # Final progress update
+        if progress_callback:
+            progress_callback(1.0)
+            if progress_thread:
+                progress_thread.join(timeout=1.0)
         
         # Get transcript from stdout
         transcript = result.stdout.strip()
@@ -110,8 +155,10 @@ def transcribe_file(audio_path: str, model_path: str, language: Optional[str] = 
             raise WhispyError("No transcription output found")
                 
     except subprocess.CalledProcessError as e:
+        process_completed.set()
         raise WhispyError(f"whisper-cli failed: {e.stderr}")
     except Exception as e:
+        process_completed.set()
         raise WhispyError(f"Transcription failed: {e}")
 
 

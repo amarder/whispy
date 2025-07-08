@@ -195,8 +195,8 @@ class TestRecordAndTranscribeCommand:
     """Test the record-and-transcribe command."""
 
     def test_record_and_transcribe_help(self, runner):
-        """Test the record-and-transcribe command help."""
-        result = runner.invoke(app, ["record-and-transcribe", "--help"])
+        """Test the record command help."""
+        result = runner.invoke(app, ["record", "--help"])
         assert result.exit_code == 0
         assert "record audio from microphone" in result.stdout.lower()
         assert "--test-mic" in result.stdout
@@ -204,10 +204,10 @@ class TestRecordAndTranscribeCommand:
 
     @patch('whispy.cli.test_microphone')
     def test_record_and_transcribe_test_mic_success(self, mock_test_mic, runner):
-        """Test record-and-transcribe with successful mic test."""
+        """Test record with successful mic test."""
         mock_test_mic.return_value = True
         
-        result = runner.invoke(app, ["record-and-transcribe", "--test-mic"])
+        result = runner.invoke(app, ["record", "--test-mic"])
         
         assert result.exit_code == 0
         assert "microphone test passed" in result.stdout.lower()
@@ -215,10 +215,10 @@ class TestRecordAndTranscribeCommand:
 
     @patch('whispy.cli.test_microphone')
     def test_record_and_transcribe_test_mic_failure(self, mock_test_mic, runner):
-        """Test record-and-transcribe with failed mic test."""
+        """Test record with failed mic test."""
         mock_test_mic.return_value = False
         
-        result = runner.invoke(app, ["record-and-transcribe", "--test-mic"])
+        result = runner.invoke(app, ["record", "--test-mic"])
         
         assert result.exit_code == 1
         assert "microphone test failed" in result.stdout.lower()
@@ -243,7 +243,7 @@ class TestRecordAndTranscribeCommand:
         }
         mock_record_audio.return_value = "/tmp/test_recording.wav"
         
-        result = runner.invoke(app, ["record-and-transcribe", "--verbose"])
+        result = runner.invoke(app, ["record", "--verbose"])
         
         assert result.exit_code == 0
         mock_check_devices.assert_called_once()
@@ -268,13 +268,13 @@ class TestRecordAndTranscribeCommand:
         mock_record_audio.return_value = "/tmp/test_recording.wav"
         
         result = runner.invoke(app, [
-            "record-and-transcribe", 
+            "record", 
             "--save-audio", "my_recording.wav"
         ])
         
         assert result.exit_code == 0
-        # Should call record_audio with the specified output path
-        mock_record_audio.assert_called_once_with(output_path="my_recording.wav")
+        # Should call record_audio with the specified output path and volume indicator
+        mock_record_audio.assert_called_once_with(output_path="my_recording.wav", show_volume=True)
 
     @patch('whispy.cli.check_audio_devices')
     @patch('whispy.cli.record_audio_until_interrupt')
@@ -290,7 +290,7 @@ class TestRecordAndTranscribeCommand:
         }
         mock_record_audio.side_effect = KeyboardInterrupt()
         
-        result = runner.invoke(app, ["record-and-transcribe"])
+        result = runner.invoke(app, ["record"])
         
         assert result.exit_code == 130  # Standard Ctrl+C exit code
         assert "cancelled by user" in result.stdout.lower()
@@ -309,7 +309,7 @@ class TestRecordAndTranscribeCommand:
             with patch('whispy.cli.transcribe_audio') as mock_transcribe:
                 mock_record.return_value = "/tmp/test.wav"
                 
-                result = runner.invoke(app, ["record-and-transcribe"])
+                result = runner.invoke(app, ["record"])
                 
                 assert result.exit_code == 0
                 assert "warning" in result.stdout.lower()

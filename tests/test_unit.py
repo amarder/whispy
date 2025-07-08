@@ -46,8 +46,9 @@ class TestTranscribeFile:
             stderr=""
         )
         
-        # Mock file existence
-        with patch('os.path.exists', return_value=True):
+        # Mock file existence and size
+        with patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=1024000):  # 1MB file size
             result = transcribe_file(
                 audio_path="test.wav",
                 model_path="model.bin"
@@ -76,7 +77,8 @@ class TestTranscribeFile:
         )
         
         # Test with language option
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=1024000):  # 1MB file size
             result = transcribe_file(
                 audio_path="test.wav",
                 model_path="model.bin",
@@ -97,7 +99,8 @@ class TestTranscribeFile:
         mock_run.side_effect = subprocess.CalledProcessError(1, 'whisper-cli', stderr="Error message")
         
         # Test the function - should raise WhispyError
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=1024000):  # 1MB file size
             with pytest.raises(Exception):  # WhispyError
                 transcribe_file(
                     audio_path="test.wav",
@@ -111,7 +114,8 @@ class TestTranscribeFile:
         mock_find_cli.return_value = None
         
         # Test the function - should raise WhispyError
-        with patch('os.path.exists', return_value=True):
+        with patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=1024000):  # 1MB file size
             with pytest.raises(Exception):  # WhispyError
                 transcribe_file(
                     audio_path="test.wav",
