@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from unittest.mock import patch
 from whispy.cli import app
 from whispy.transcribe import find_whisper_cli, find_default_model
+from whispy import WhispyError
 
 
 @pytest.fixture
@@ -338,6 +339,148 @@ class TestIntegration:
         output_lower = output.lower()
         assert "ask" in output_lower
         assert "country" in output_lower
+
+
+@pytest.mark.cli
+class TestRealtimeCLI:
+    """Test the realtime CLI command"""
+    
+    def test_realtime_help(self, runner):
+        """Test realtime command help"""
+        result = runner.invoke(app, ["realtime", "--help"])
+        assert result.exit_code == 0
+        assert "Real-time transcription from microphone" in result.stdout
+        assert "--chunk-duration" in result.stdout
+        assert "--overlap-duration" in result.stdout
+        assert "--silence-threshold" in result.stdout
+        assert "--show-chunks" in result.stdout
+        assert "--test-setup" in result.stdout
+    
+    @patch('whispy.cli.test_realtime_setup')
+    def test_realtime_test_setup_success(self, mock_test_setup, runner):
+        """Test realtime --test-setup success"""
+        mock_test_setup.return_value = True
+        
+        result = runner.invoke(app, ["realtime", "--test-setup"])
+        assert result.exit_code == 0
+        assert "Real-time transcription setup is ready!" in result.stdout
+        mock_test_setup.assert_called_once()
+    
+    @patch('whispy.cli.test_realtime_setup')
+    def test_realtime_test_setup_failure(self, mock_test_setup, runner):
+        """Test realtime --test-setup failure"""
+        mock_test_setup.return_value = False
+        
+        result = runner.invoke(app, ["realtime", "--test-setup"])
+        assert result.exit_code == 1
+        assert "Real-time transcription setup failed" in result.stdout
+        mock_test_setup.assert_called_once()
+    
+    def test_realtime_invalid_chunk_duration(self, runner):
+        """Test realtime with invalid chunk duration"""
+        result = runner.invoke(app, ["realtime", "--chunk-duration", "0"])
+        assert result.exit_code == 1
+        assert "Chunk duration must be positive" in result.stdout
+    
+    def test_realtime_invalid_overlap_duration(self, runner):
+        """Test realtime with invalid overlap duration"""
+        result = runner.invoke(app, ["realtime", "--chunk-duration", "3.0", "--overlap-duration", "3.5"])
+        assert result.exit_code == 1
+        assert "Overlap duration must be between 0 and chunk duration" in result.stdout
+    
+    def test_realtime_invalid_silence_threshold(self, runner):
+        """Test realtime with invalid silence threshold"""
+        result = runner.invoke(app, ["realtime", "--silence-threshold", "1.5"])
+        assert result.exit_code == 1
+        assert "Silence threshold must be between 0 and 1" in result.stdout
+    
+    @patch('whispy.cli.run_realtime_transcription')
+    def test_realtime_success(self, mock_run_realtime, runner):
+        """Test successful realtime transcription"""
+        mock_run_realtime.return_value = "Hello world from realtime"
+        
+        result = runner.invoke(app, ["realtime"])
+        assert result.exit_code == 0
+        assert "Real-time transcription completed" in result.stdout
+        mock_run_realtime.assert_called_once()
+    
+    @patch('whispy.cli.run_realtime_transcription')
+    def test_realtime_with_options(self, mock_run_realtime, runner):
+        """Test realtime with custom options"""
+        mock_run_realtime.return_value = "Custom realtime transcript"
+        
+        result = runner.invoke(app, [
+            "realtime",
+            "--model", "/path/to/model.bin",
+            "--language", "en",
+            "--chunk-duration", "2.5",
+            "--overlap-duration", "0.5",
+            "--silence-threshold", "0.02",
+            "--output", "realtime_output.txt",
+            "--show-chunks",
+            "--verbose"
+        ])
+        assert result.exit_code == 0
+        assert "Real-time transcription completed" in result.stdout
+        
+        # Check that the function was called with correct parameters
+        mock_run_realtime.assert_called_once_with(
+            model_path="/path/to/model.bin",
+            language="en",
+            chunk_duration=2.5,
+            overlap_duration=0.5,
+            silence_threshold=0.02,
+            output_file="realtime_output.txt",
+            verbose=True,
+            show_chunks=True
+        )
+    
+    @patch('whispy.cli.run_realtime_transcription')
+    def test_realtime_no_transcript(self, mock_run_realtime, runner):
+        """Test realtime when no audio is transcribed"""
+        mock_run_realtime.return_value = ""
+        
+        result = runner.invoke(app, ["realtime"])
+        assert result.exit_code == 0
+        assert "No audio was transcribed" in result.stdout
+    
+    @patch('whispy.cli.run_realtime_transcription')
+    def test_realtime_whispy_error(self, mock_run_realtime, runner):
+        """Test realtime with WhispyError"""
+        mock_run_realtime.side_effect = WhispyError("Realtime setup failed")
+        
+        result = runner.invoke(app, ["realtime"])
+        assert result.exit_code == 1
+        assert "Realtime setup failed" in result.stdout
+    
+    @patch('whispy.cli.run_realtime_transcription')
+    def test_realtime_keyboard_interrupt(self, mock_run_realtime, runner):
+        """Test realtime with keyboard interrupt"""
+        mock_run_realtime.side_effect = KeyboardInterrupt()
+        
+        result = runner.invoke(app, ["realtime"])
+        assert result.exit_code == 0
+        assert "Real-time transcription interrupted" in result.stdout
+    
+    @patch('whispy.cli.run_realtime_transcription')
+    def test_realtime_unexpected_error(self, mock_run_realtime, runner):
+        """Test realtime with unexpected error"""
+        mock_run_realtime.side_effect = Exception("Unexpected error")
+        
+        result = runner.invoke(app, ["realtime"])
+        assert result.exit_code == 1
+        assert "Unexpected error" in result.stdout
+    
+    @patch('whispy.cli.run_realtime_transcription')
+    def test_realtime_unexpected_error_verbose(self, mock_run_realtime, runner):
+        """Test realtime with unexpected error in verbose mode"""
+        mock_run_realtime.side_effect = Exception("Unexpected error")
+        
+        result = runner.invoke(app, ["realtime", "--verbose"])
+        assert result.exit_code == 1
+        assert "Unexpected error" in result.stdout
+        # In verbose mode, traceback should be included
+        assert "Traceback" in result.stdout or "Exception" in result.stdout
 
 
 # Marks for different test categories

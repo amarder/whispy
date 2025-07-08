@@ -10,16 +10,21 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+from rich.text import Text
+from rich.panel import Panel
 
 from . import __version__, WhispyError
 from .transcribe import transcribe_file, find_default_model, find_whisper_cli, build_whisper_cli
 from .recorder import record_audio_until_interrupt, check_audio_devices, test_microphone
+from .realtime import run_realtime_transcription, test_realtime_setup
 
 console = Console()
 app = typer.Typer(
     name="whispy",
-    help="Fast speech recognition using whisper.cpp",
+    help="🎤 Whispy - A powerful CLI for audio transcription using Whisper",
     add_completion=False,
+    no_args_is_help=True,
 )
 
 
@@ -348,6 +353,140 @@ def info() -> None:
         console.print(f"[bold]whisper.cpp directory:[/bold] {whisper_cpp_dir.absolute()}")
     else:
         console.print("[bold]whisper.cpp directory:[/bold] [red]Not found[/red]")
+
+
+@app.command()
+def realtime(
+    model: Optional[str] = typer.Option(
+        None,
+        "--model", "-m",
+        help="Path to Whisper model file (auto-detected if not specified)"
+    ),
+    language: Optional[str] = typer.Option(
+        None,
+        "--language", "-l",
+        help="Language code (e.g., 'en', 'es', 'fr')"
+    ),
+    chunk_duration: float = typer.Option(
+        3.0,
+        "--chunk-duration", "-c",
+        help="Duration of each audio chunk in seconds (default: 3.0)"
+    ),
+    overlap_duration: float = typer.Option(
+        1.0,
+        "--overlap-duration", "-o",
+        help="Overlap between chunks in seconds (default: 1.0)"
+    ),
+    silence_threshold: float = typer.Option(
+        0.01,
+        "--silence-threshold", "-s",
+        help="Voice activity detection threshold (default: 0.01)"
+    ),
+    output_file: Optional[str] = typer.Option(
+        None,
+        "--output", "-f",
+        help="Save final transcript to file"
+    ),
+    show_chunks: bool = typer.Option(
+        False,
+        "--show-chunks",
+        help="Show individual chunk transcripts instead of continuous mode"
+    ),
+    test_setup: bool = typer.Option(
+        False,
+        "--test-setup",
+        help="Test real-time setup without starting transcription"
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose", "-v",
+        help="Enable verbose output"
+    ),
+):
+    """
+    🔴 Real-time transcription from microphone.
+    
+    Continuously transcribes audio from your microphone in real-time using
+    overlapping audio chunks for smooth, continuous transcription.
+    
+    Examples:
+        whispy realtime                    # Start real-time transcription
+        whispy realtime --show-chunks      # Show individual chunks
+        whispy realtime -c 2.0 -o 0.5     # Custom chunk/overlap timing
+        whispy realtime --output live.txt  # Save final transcript
+        whispy realtime --test-setup       # Test setup only
+    """
+    try:
+        # Test setup mode
+        if test_setup:
+            console.print("🔧 Testing real-time transcription setup...")
+            success = test_realtime_setup()
+            if success:
+                console.print("✅ Real-time transcription setup is ready!", style="green")
+            else:
+                console.print("❌ Real-time transcription setup failed", style="red")
+                raise typer.Exit(1)
+            return
+        
+        # Validate parameters
+        if chunk_duration <= 0:
+            console.print("❌ Chunk duration must be positive", style="red")
+            raise typer.Exit(1)
+        
+        if overlap_duration < 0 or overlap_duration >= chunk_duration:
+            console.print("❌ Overlap duration must be between 0 and chunk duration", style="red")
+            raise typer.Exit(1)
+        
+        if silence_threshold < 0 or silence_threshold > 1:
+            console.print("❌ Silence threshold must be between 0 and 1", style="red")
+            raise typer.Exit(1)
+        
+        # Show configuration
+        config_table = Table(title="🔴 Real-time Transcription Configuration")
+        config_table.add_column("Setting", style="cyan")
+        config_table.add_column("Value", style="white")
+        
+        config_table.add_row("Model", model or "auto-detected")
+        config_table.add_row("Language", language or "auto-detected")
+        config_table.add_row("Chunk Duration", f"{chunk_duration}s")
+        config_table.add_row("Overlap Duration", f"{overlap_duration}s")
+        config_table.add_row("Silence Threshold", f"{silence_threshold}")
+        config_table.add_row("Output Mode", "chunks" if show_chunks else "continuous")
+        if output_file:
+            config_table.add_row("Output File", output_file)
+        
+        console.print(config_table)
+        console.print()
+        
+        # Run real-time transcription
+        final_transcript = run_realtime_transcription(
+            model_path=model,
+            language=language,
+            chunk_duration=chunk_duration,
+            overlap_duration=overlap_duration,
+            silence_threshold=silence_threshold,
+            output_file=output_file,
+            verbose=verbose,
+            show_chunks=show_chunks
+        )
+        
+        if final_transcript:
+            console.print(f"\n✅ Real-time transcription completed ({len(final_transcript)} characters)")
+        else:
+            console.print("ℹ️ No audio was transcribed", style="yellow")
+            
+    except WhispyError as e:
+        console.print(f"❌ {e}", style="red")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        console.print("\n🛑 Real-time transcription interrupted", style="yellow")
+        raise typer.Exit(0)
+    except Exception as e:
+        console.print(f"❌ Unexpected error: {e}", style="red")
+        if verbose:
+            import traceback
+            console.print(traceback.format_exc())
+        raise typer.Exit(1)
 
 
 def main() -> None:

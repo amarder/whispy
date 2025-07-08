@@ -136,6 +136,37 @@ whispy record-and-transcribe --output transcript.txt --save-audio recording.wav
 whispy record-and-transcribe --verbose
 ```
 
+### Real-time transcription
+
+Transcribe audio from your microphone in real-time using streaming chunks:
+
+```bash
+# Start real-time transcription (press Ctrl+C to stop)
+whispy realtime
+
+# With custom settings for faster/slower processing
+whispy realtime --chunk-duration 2.0 --overlap-duration 0.5 --silence-threshold 0.02
+
+# Show individual chunks instead of continuous output
+whispy realtime --show-chunks
+
+# Save final transcript to file
+whispy realtime --output live_transcript.txt
+
+# Test real-time setup
+whispy realtime --test-setup
+
+# Verbose mode for debugging
+whispy realtime --verbose
+```
+
+**Real-time Parameters:**
+- `--chunk-duration`: Duration of each audio chunk in seconds (default: 3.0)
+- `--overlap-duration`: Overlap between chunks in seconds (default: 1.0)
+- `--silence-threshold`: Voice activity detection threshold (default: 0.01)
+- `--show-chunks`: Show individual chunk transcripts instead of continuous mode
+- `--test-setup`: Test real-time setup without starting transcription
+
 ### System information
 
 ```bash
@@ -193,6 +224,12 @@ whispy record-and-transcribe \
 
 # Quick voice memo transcription
 whispy record-and-transcribe --language en --output memo.txt
+
+# Real-time transcription with live output
+whispy realtime
+
+# Real-time transcription with custom settings
+whispy realtime --chunk-duration 2.0 --show-chunks --output live_notes.txt
 ```
 
 ## Testing
