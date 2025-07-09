@@ -101,9 +101,67 @@ jobs:
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
 
+  build-testpypi:
+    name: Build for TestPyPI
+    needs: [python-tests]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake portaudio19-dev libasound2-dev
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build toml
+    
+    - name: Modify package name for TestPyPI
+      run: |
+        python -c "
+        import toml
+        # Read the original pyproject.toml
+        with open('pyproject.toml', 'r') as f:
+            config = toml.load(f)
+        
+        # Change the package name to whispy2 for TestPyPI
+        config['project']['name'] = 'whispy2'
+        
+        # Write the modified config
+        with open('pyproject.toml', 'w') as f:
+            toml.dump(config, f)
+        
+        print('Package name changed to whispy2 for TestPyPI')
+        "
+    
+    - name: Build project for TestPyPI
+      run: python -m build
+    
+    - name: Verify build outputs
+      run: |
+        test -f dist/*.whl
+        test -f dist/*.tar.gz
+        # Verify the package name is whispy2
+        python -m zipfile -l dist/*.whl | grep "whispy2/"
+    
+    - name: Store TestPyPI artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: testpypi-package-distributions
+        path: dist/
+
   publish-to-testpypi:
     name: Publish to TestPyPI
-    needs: build
+    needs: build-testpypi
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     environment:
@@ -114,10 +172,10 @@ jobs:
       id-token: write
 
     steps:
-    - name: Download artifacts
+    - name: Download TestPyPI artifacts
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions
+        name: testpypi-package-distributions
         path: dist/
     
     - name: Publish to TestPyPI
