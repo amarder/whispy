@@ -13,7 +13,7 @@ from whispy.recorder import (
     AudioRecorder,
     record_audio_until_interrupt,
     check_audio_devices,
-    test_microphone
+    test_microphone as test_microphone_func
 )
 
 
@@ -210,7 +210,7 @@ class TestRecordingFunctions:
         mock_recorder.get_recording_duration.return_value = 1.0  # 1 second recorded
         mock_recorder.peak_volume = 0.1  # Above threshold (0.001)
         
-        result = test_microphone()
+        result = test_microphone_func()
         
         assert result is True
         mock_recorder_class.assert_called_once_with(show_volume=False)
@@ -230,7 +230,7 @@ class TestRecordingFunctions:
         audio_data = np.array([0.0001, 0.0001, 0.0001] * 1000)
         mock_recorder.stop_recording.return_value = audio_data
         
-        result = test_microphone()
+        result = test_microphone_func()
         
         assert result is False
 
@@ -241,7 +241,7 @@ class TestRecordingFunctions:
         mock_recorder_class.return_value = mock_recorder
         mock_recorder.stop_recording.return_value = np.array([])
         
-        result = test_microphone()
+        result = test_microphone_func()
         
         assert result is False
 
@@ -250,7 +250,7 @@ class TestRecordingFunctions:
         """Test microphone test failure."""
         mock_recorder_class.side_effect = Exception("Microphone error")
         
-        result = test_microphone()
+        result = test_microphone_func()
         
         assert result is False
 

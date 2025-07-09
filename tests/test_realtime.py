@@ -9,7 +9,7 @@ import numpy as np
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
-from whispy.realtime import RealtimeTranscriber, run_realtime_transcription, test_realtime_setup
+from whispy.realtime import RealtimeTranscriber, run_realtime_transcription, test_realtime_setup as realtime_setup_func
 from whispy import WhispyError
 
 
@@ -286,7 +286,7 @@ class TestTestRealtimeSetup:
             {'name': 'Built-in Microphone', 'max_input_channels': 2}
         ]
         
-        result = test_realtime_setup()
+        result = realtime_setup_func()
         assert result is True
     
     @patch('whispy.realtime.find_whisper_cli')
@@ -294,7 +294,7 @@ class TestTestRealtimeSetup:
         """Test setup test when whisper-cli is not found"""
         mock_find_cli.return_value = None
         
-        result = test_realtime_setup()
+        result = realtime_setup_func()
         assert result is False
     
     @patch('whispy.realtime.find_whisper_cli')
@@ -304,7 +304,7 @@ class TestTestRealtimeSetup:
         mock_find_cli.return_value = '/usr/bin/whisper-cli'
         mock_find_model.return_value = None
         
-        result = test_realtime_setup()
+        result = realtime_setup_func()
         assert result is False
     
     @patch('whispy.realtime.find_whisper_cli')
@@ -316,7 +316,7 @@ class TestTestRealtimeSetup:
         mock_find_model.return_value = '/path/to/model.bin'
         mock_query_devices.side_effect = Exception("Audio error")
         
-        result = test_realtime_setup()
+        result = realtime_setup_func()
         assert result is False
 
 
