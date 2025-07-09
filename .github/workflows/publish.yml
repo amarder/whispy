@@ -1,0 +1,163 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # Run tests directly in this workflow to ensure they pass before building
+  python-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]  # Only test one version for publishing workflow
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake portaudio19-dev libasound2-dev
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+    
+    - name: Run Python tests
+      run: |
+        # Set environment variables for headless audio testing
+        export PULSE_RUNTIME_PATH=/tmp/pulse
+        export PULSE_CONFIG_PATH=/tmp/pulse
+        export PULSE_STATE_PATH=/tmp/pulse
+        pytest
+
+  build:
+    needs: [python-tests]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake portaudio19-dev libasound2-dev
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
+    
+    - name: Build project
+      run: python -m build
+    
+    - name: Verify build outputs
+      run: |
+        test -f dist/*.whl
+        test -f dist/*.tar.gz
+    
+    - name: Verify package contents
+      run: |
+        python -m zipfile -l dist/*.whl | grep "whispy/"
+    
+    - name: Store artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/whispy
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+    
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-to-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    environment:
+      name: testpypi
+      # whispy already existed on test.pypi so I went with whispy2 for testing
+      url: https://test.pypi.org/p/whispy2
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+    
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+
+  create-github-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+    
+    - name: Create Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create ${{ github.ref_name }} \
+          --title "Release ${{ github.ref_name }}" \
+          --notes "## Changes in ${{ github.ref_name }}
+
+        See the [PyPI release](https://pypi.org/project/whispy/${{ github.ref_name }}/) for installation instructions.
+
+        ## Installation
+        \`\`\`bash
+        pip install whispy==${{ github.ref_name }}
+        \`\`\`
+
+        ## Assets
+        - **Wheel**: For pip installation  
+        - **Source**: Source distribution" \
+          dist/*.whl dist/*.tar.gz 
