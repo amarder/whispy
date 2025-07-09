@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel", "cmake>=3.10"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "whispy"
+name = "whisper.py"
 version = "0.1.0"
 authors = [
   { name="Whispy Team", email="whispy@example.com" },
