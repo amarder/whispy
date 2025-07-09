@@ -200,7 +200,8 @@ class TestRecordAndTranscribeCommand:
         assert result.exit_code == 0
         assert "record audio from microphone" in result.stdout.lower()
         # Strip ANSI color codes for reliable text matching
-        plain_output = result.stdout.encode('ascii', 'ignore').decode('ascii')
+        import re
+        plain_output = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
         assert "--test-mic" in plain_output
         assert "--save-audio" in plain_output
 
@@ -362,7 +363,8 @@ class TestRealtimeCLI:
         assert result.exit_code == 0
         assert "Real-time transcription from microphone" in result.stdout
         # Strip ANSI color codes for reliable text matching
-        plain_output = result.stdout.encode('ascii', 'ignore').decode('ascii')
+        import re
+        plain_output = re.sub(r'\x1b\[[0-9;]*m', '', result.stdout)
         assert "--chunk-duration" in plain_output
         assert "--overlap-duration" in plain_output
         assert "--silence-threshold" in plain_output
